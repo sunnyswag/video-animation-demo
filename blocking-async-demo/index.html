@@ -208,6 +208,19 @@
   #cview .ln .cm { color: #7c8b62; }
   #cview .ln.on { background: rgba(255, 180, 84, .13); color: var(--text); box-shadow: inset 3px 0 0 var(--amber); }
 
+  /* ===== 线程时间账 ===== */
+  #stats {
+    position: absolute; left: 14px; right: 14px; bottom: 10px; z-index: 6;
+    display: none; align-items: center; gap: 16px;
+    padding: 8px 14px; border: 1px solid var(--line); border-radius: 10px;
+    background: rgba(20, 16, 12, .88); font-size: 13px; color: var(--dim);
+  }
+  #stats .nums b { color: var(--text); font-size: 15px; }
+  #stats .c-work b { color: var(--green); } #stats .c-chore b { color: var(--amber); } #stats .c-wait b { color: var(--red); }
+  #stats .stack { flex: 1; display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #241c14; }
+  #stats .stack i { display: block; height: 100%; width: 0; transition: width .35s; }
+  #sbWork { background: var(--green); } #sbChore { background: var(--amber); } #sbWait { background: var(--red); }
+
   /* ===== 右侧栏 ===== */
   #side { display: flex; flex-direction: column; gap: 14px; min-height: 440px; }
   #console {
@@ -282,6 +295,14 @@
       </div>
       <div class="floor"></div>
       <div id="waiter"><span id="waiterFace">🧍</span></div>
+      <!-- 线程时间账：实时统计送餐员（线程）的 tick 去向 -->
+      <div id="stats">
+        <span class="nums">⏱ <b id="stTotal">0</b> tick</span>
+        <span class="nums c-work">🔨 干活 <b id="stWork">0</b></span>
+        <span class="nums c-chore">🧹 杂活 <b id="stChore">0</b></span>
+        <span class="nums c-wait">😴 阻塞等待 <b id="stWait">0</b></span>
+        <div class="stack"><i id="sbWork"></i><i id="sbChore"></i><i id="sbWait"></i></div>
+      </div>
     </div>
 
     <!-- 总览 2×2 视图 -->
@@ -334,17 +355,18 @@ function createKitchen() {
 
 // 场景一 · 同步阻塞：死等当前这单，送完才接下一单
 // mood: work=跑动 / blocked=站着睡(阻塞) / sit=坐椅子(阻塞) / carry=上菜 / idle=收工
+// cost: work=干活(下单/上菜) / chore=杂活 / wait=阻塞等待 / free=不计入(收尾)
 function* syncBlocking(kitchen, state) {
   for (const t of TABLES) {
     kitchen.submit(t);
-    yield { text: `${t} 桌下单，送餐员把单子递进厨房，然后杵在窗口等`, at: 'window', mood: 'work' };
+    yield { text: `${t} 桌下单，送餐员把单子递进厨房，然后杵在窗口等`, at: 'window', mood: 'work', cost: 'work' };
     while (!kitchen.ready().some(o => o.table === t)) {
-      yield { text: `（死等 ${t} 的菜……线程阻塞中，哪也不去）`, at: 'window', mood: 'blocked' };
+      yield { text: `（死等 ${t} 的菜……线程阻塞中，哪也不去）`, at: 'window', mood: 'blocked', cost: 'wait' };
     }
     kitchen.take(t); state.served.push(t);
-    yield { text: `取餐，送到 ${t} 桌 ✅（严格 A→B→C = 同步；死等 = 阻塞）`, at: t, mood: 'carry' };
+    yield { text: `取餐，送到 ${t} 桌 ✅（严格 A→B→C = 同步；死等 = 阻塞）`, at: t, mood: 'carry', cost: 'work' };
   }
-  yield { text: `🏁 全部送完：送餐员大部分时间都在等，B/C 桌全程干等`, at: 'hall1', mood: 'idle' };
+  yield { text: `🏁 全部送完：送餐员大部分时间都在等，B/C 桌全程干等`, at: 'hall1', mood: 'idle', cost: 'free' };
 }
 
 // 场景二 · 同步非阻塞（轮询：不死等，但顺序仍死守 A→B→C）
@@ -352,60 +374,60 @@ function* syncNonBlocking(kitchen, state) {
   let chores = 0, spot = 0;
   for (const t of TABLES) {
     kitchen.submit(t);
-    yield { text: `${t} 桌下单（心里只装着这一单）`, at: t, mood: 'work' };
+    yield { text: `${t} 桌下单（心里只装着这一单）`, at: t, mood: 'work', cost: 'work' };
     while (!kitchen.ready().some(o => o.table === t)) {
       chores++; spot = 1 - spot;
-      yield { text: `跑窗口问「${t} 好了没」→ 没好，回去干杂活 #${chores}（线程没睡 = 非阻塞；死守 A→B→C = 同步）`, at: spot ? 'window' : 'hall1', mood: 'work' };
+      yield { text: `跑窗口问「${t} 好了没」→ 没好，回去干杂活 #${chores}（线程没睡 = 非阻塞；死守 A→B→C = 同步）`, at: spot ? 'window' : 'hall1', mood: 'work', cost: 'chore' };
     }
     kitchen.take(t); state.served.push(t);
-    yield { text: `取餐送到 ${t} 桌 ✅（顺序仍 A→B→C）`, at: t, mood: 'carry' };
+    yield { text: `取餐送到 ${t} 桌 ✅（顺序仍 A→B→C）`, at: t, mood: 'carry', cost: 'work' };
   }
-  yield { text: `🏁 全部送完：顺序保住了，但大量跑腿是空转（CPU 空转）`, at: 'hall2', mood: 'idle' };
+  yield { text: `🏁 全部送完：顺序保住了，但大量跑腿是空转（CPU 空转）`, at: 'hall2', mood: 'idle', cost: 'free' };
 }
 
 // 场景三 · 异步阻塞（全部下单后坐下等铃 = epoll_wait(-1)）
 function* asyncBlocking(kitchen, state) {
   for (const t of TABLES) {
     kitchen.submit(t);
-    yield { text: `${t} 桌下单，领一个餐铃 🛎️（= epoll_ctl 注册）`, at: t, mood: 'work' };
+    yield { text: `${t} 桌下单，领一个餐铃 🛎️（= epoll_ctl 注册）`, at: t, mood: 'work', cost: 'work' };
   }
-  yield { text: `三单都下完了，送餐员坐下 —— epoll_wait(-1)，线程睡死`, at: 'seat', mood: 'sit' };
+  yield { text: `三单都下完了，送餐员坐下 —— epoll_wait(-1)，线程睡死`, at: 'seat', mood: 'sit', cost: 'wait' };
   while (state.served.length < TABLES.length) {
     const served = kitchen.ready();
     if (!served.length) {
-      yield { text: `（坐着等铃响……线程阻塞中。页面没卡死吧？线程睡着 ≠ 死了）`, at: 'seat', mood: 'sit' };
+      yield { text: `（坐着等铃响……线程阻塞中。页面没卡死吧？线程睡着 ≠ 死了）`, at: 'seat', mood: 'sit', cost: 'wait' };
       continue;
     }
     for (const o of served) {
       kitchen.take(o.table); state.served.push(o.table);
-      yield { text: `🔔 ${o.table} 的铃响了！取餐送到 ${o.table} 桌 ✅（出锅顺序 ≠ 下单顺序 = 异步）`, at: o.table, mood: 'carry' };
+      yield { text: `🔔 ${o.table} 的铃响了！取餐送到 ${o.table} 桌 ✅（出锅顺序 ≠ 下单顺序 = 异步）`, at: o.table, mood: 'carry', cost: 'work' };
     }
   }
-  yield { text: `🏁 全部送完：等待时线程在睡（阻塞），上菜顺序看铃（异步）`, at: 'seat', mood: 'sit' };
+  yield { text: `🏁 全部送完：等待时线程在睡（阻塞），上菜顺序看铃（异步）`, at: 'seat', mood: 'sit', cost: 'free' };
 }
 
 // 场景四 · 异步非阻塞（不等铃先干活，铃响再回来取餐）
 function* asyncNonBlocking(kitchen, state) {
   for (const t of TABLES) {
     kitchen.submit(t);
-    yield { text: `${t} 桌下单，领餐铃 🛎️`, at: t, mood: 'work' };
+    yield { text: `${t} 桌下单，领餐铃 🛎️`, at: t, mood: 'work', cost: 'work' };
   }
   // 与场景三的「坐下」叙事拍对齐：保证两个场景厨房时间轴一致，差别只在送餐员干什么
-  yield { text: `三单都下完了，不等铃 —— 直接去大堂干活（事件循环继续转）`, at: 'hall1', mood: 'work' };
+  yield { text: `三单都下完了，不等铃 —— 直接去大堂干活（事件循环继续转）`, at: 'hall1', mood: 'work', cost: 'chore' };
   let chores = 0, spot = 0;
   while (state.served.length < TABLES.length) {
     const served = kitchen.ready();
     if (served.length) {
       for (const o of served) {
         kitchen.take(o.table); state.served.push(o.table);
-        yield { text: `🔔 ${o.table} 铃响 → 放下手头活，取餐送到 ${o.table} 桌 ✅（异步）`, at: o.table, mood: 'carry' };
+        yield { text: `🔔 ${o.table} 铃响 → 放下手头活，取餐送到 ${o.table} 桌 ✅（异步）`, at: o.table, mood: 'carry', cost: 'work' };
       }
     } else {
       chores++; spot = 1 - spot;
-      yield { text: `没铃响 → 继续干杂活 #${chores}（倒水/招呼客人，线程不睡 = 非阻塞）`, at: spot ? 'hall1' : 'hall2', mood: 'work' };
+      yield { text: `没铃响 → 继续干杂活 #${chores}（倒水/招呼客人，线程不睡 = 非阻塞）`, at: spot ? 'hall1' : 'hall2', mood: 'work', cost: 'chore' };
     }
   }
-  yield { text: `🏁 全部送完：等待的时间全变成了有用功`, at: 'hall1', mood: 'idle' };
+  yield { text: `🏁 全部送完：等待的时间全变成了有用功`, at: 'hall1', mood: 'idle', cost: 'free' };
 }
 
 // 总览 · 2×2 坐标系
@@ -476,13 +498,14 @@ let kitchen, state, gen;
 
 function start() {
   kitchen = createKitchen();
-  state = { served: [] };
+  state = { served: [], stats: { total: 0, work: 0, chore: 0, wait: 0 }, ended: false };
   gen = scene.make(kitchen, state);
   consoleEl.innerHTML = '';
   log(`【${scene.title}】按空格开始 ▶`);
   moveWaiter('hall1');
   setMood('idle');
   render();
+  renderStats();
 }
 
 function log(text) {
@@ -548,7 +571,12 @@ function step() {
     return;
   }
   const v = r.value;
+  if (v.cost && v.cost !== 'free') { state.stats.total++; state.stats[v.cost]++; }
   if (v.text) log(v.text);
+  if (v.cost === 'free' && state.stats.total) {   // 🏁 拍直接输出时间账总结
+    const s = state.stats;
+    log(`📊 线程时间账：共 ${s.total} tick —— 🔨 干活 ${s.work} · 🧹 杂活 ${s.chore} · 😴 阻塞等待 ${s.wait}`);
+  }
   if (v.at) moveWaiter(v.at);
   if (v.mood) setMood(v.mood);
   if (scene.view === 'quad' && 'quad' in v) {
@@ -560,11 +588,26 @@ function step() {
     });
   }
   render();
+  renderStats();
+}
+
+// 线程时间账：数字 + 占比条
+function renderStats() {
+  const s = state.stats;
+  $('#stTotal').textContent = s.total;
+  $('#stWork').textContent = s.work;
+  $('#stChore').textContent = s.chore;
+  $('#stWait').textContent = s.wait;
+  const pct = n => s.total ? (n / s.total * 100) + '%' : '0%';
+  $('#sbWork').style.width = pct(s.work);
+  $('#sbChore').style.width = pct(s.chore);
+  $('#sbWait').style.width = pct(s.wait);
 }
 
 // ===== 视图初始化 =====
 document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.scene === sceneName));
 $('#restaurant').style.display = scene.view === 'restaurant' ? '' : 'none';
+$('#stats').style.display     = scene.view === 'restaurant' ? 'flex' : 'none';
 $('#quadview').style.display  = scene.view === 'quad' ? 'block' : 'none';
 $('#cview').style.display     = scene.view === 'c' ? 'block' : 'none';
 $('#freeze').style.display    = scene.freeze ? 'inline-block' : 'none';
