@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深夜食堂 · 同步/异步 × 阻塞/非阻塞</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e0b09; --panel: #1a1410; --panel2: #14100c; --line: #33291f;
+    --text: #f2e9dc; --dim: #a89880;
+    --amber: #ffb454; --red: #ff5f56; --green: #8fd18a; --cyan: #57c7d4;
+    --display: "ZCOOL KuaiLe", "Noto Sans SC", sans-serif;
+    --body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--text); font: 15px/1.7 var(--body);
+    background:
+      radial-gradient(1200px 500px at 70% -10%, rgba(255, 180, 84, .07), transparent 60%),
+      radial-gradient(900px 420px at 10% 110%, rgba(255, 95, 86, .05), transparent 60%),
+      var(--bg);
+    min-height: 100vh;
+  }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+  .reveal { animation: rise .6s cubic-bezier(.2, .7, .3, 1) both; }
+  .reveal.d1 { animation-delay: .08s; } .reveal.d2 { animation-delay: .16s; }
+
+  /* ===== 顶栏：霓虹招牌 ===== */
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+    padding: 14px 24px; border-bottom: 1px solid var(--line);
+  }
+  .logo {
+    font: 26px var(--display); color: var(--amber); letter-spacing: 4px;
+    text-shadow: 0 0 18px rgba(255, 180, 84, .55), 0 0 46px rgba(255, 180, 84, .25);
+    margin-right: 6px;
+  }
+  .logo small { display: block; font: 12px var(--body); color: var(--dim); letter-spacing: 2px; text-shadow: none; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; }
+  nav a {
+    color: var(--dim); text-decoration: none; padding: 4px 13px; font-size: 13.5px;
+    border: 1px solid var(--line); border-radius: 999px; transition: all .25s;
+  }
+  nav a:hover { color: var(--amber); border-color: var(--amber); }
+  nav a.active {
+    color: #241300; background: var(--amber); border-color: var(--amber);
+    box-shadow: 0 0 14px rgba(255, 180, 84, .5); font-weight: 700;
+  }
+  .hint { margin-left: auto; color: var(--dim); font-size: 12.5px; }
+  kbd {
+    background: var(--panel); border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 5px; padding: 0 6px; font: 12px var(--body); color: var(--text);
+  }
+
+  main {
+    display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 18px;
+    max-width: 1560px; margin: 18px auto; padding: 0 24px;
+  }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+
+  /* ===== 舞台 ===== */
+  #stage {
+    position: relative; border: 1px solid var(--line); border-radius: 16px;
+    aspect-ratio: 16 / 9; min-height: 440px; overflow: hidden;
+    background:
+      radial-gradient(700px 260px at 50% 0%, rgba(255, 180, 84, .09), transparent 65%),
+      linear-gradient(#171210, #100c09);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .5), inset 0 0 80px rgba(0, 0, 0, .35);
+  }
+  .zone-label { position: absolute; color: var(--dim); font-size: 12px; letter-spacing: 3px; }
+  #kitchen .zone-label { right: 14px; top: 6px; }
+
+  /* 灯笼串 */
+  .lanterns { position: absolute; left: 8%; right: 8%; top: 3.5%; display: flex; justify-content: space-between; pointer-events: none; }
+  .lanterns i {
+    width: 14px; height: 18px; border-radius: 45% 45% 50% 50%;
+    background: radial-gradient(circle at 50% 35%, #ffd9a0, var(--amber) 60%, #d97b2b);
+    box-shadow: 0 0 16px rgba(255, 180, 84, .8), 0 0 40px rgba(255, 180, 84, .35);
+    animation: sway 4.5s ease-in-out infinite; transform-origin: top center;
+  }
+  .lanterns i::before { content: ''; display: block; width: 2px; height: 8px; background: #6b5636; margin: -8px auto 0; }
+  .lanterns i:nth-child(2n) { animation-delay: -1.2s; }
+  .lanterns i:nth-child(3n) { animation-delay: -2.4s; }
+  @keyframes sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+
+  /* 厨房 */
+  #kitchen {
+    position: absolute; left: 6%; right: 6%; top: 9%; height: 27%;
+    border: 1px solid #4a3220; border-radius: 14px; padding: 10px 14px;
+    background: linear-gradient(#241811, #1b120c);
+    box-shadow: inset 0 -14px 30px rgba(255, 140, 50, .08);
+  }
+  #kitchen .window {
+    position: absolute; left: 50%; bottom: -1px; transform: translateX(-50%);
+    width: 200px; height: 12px; border-radius: 8px 8px 0 0;
+    background: linear-gradient(#ffd9a0, var(--amber));
+    box-shadow: 0 0 22px rgba(255, 180, 84, .7);
+    animation: flicker 3s ease-in-out infinite;
+  }
+  @keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: .82; } }
+  #orders { display: flex; gap: 12px; margin-top: 10px; }
+  .order {
+    position: relative; min-width: 128px; padding: 8px 12px; font-size: 13px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel2);
+    animation: rise .35s both;
+  }
+  .order .bar { height: 5px; background: #2c2118; border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .order .bar i {
+    display: block; height: 100%; border-radius: 3px; transition: width .3s;
+    background: linear-gradient(90deg, #d97b2b, var(--amber));
+  }
+  .order.ready {
+    border-color: var(--green); background: #12200f;
+    box-shadow: 0 0 16px rgba(143, 209, 138, .4); animation: pulse 1s ease-in-out infinite;
+  }
+  .order.ready .bar i { background: var(--green); }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 10px rgba(143, 209, 138, .25); } 50% { box-shadow: 0 0 22px rgba(143, 209, 138, .55); } }
+  /* 蒸汽 */
+  .steam { position: absolute; top: -4px; right: 10px; }
+  .steam i {
+    position: absolute; width: 4px; height: 4px; border-radius: 50%;
+    background: rgba(242, 233, 220, .55); animation: steam 1.6s ease-in infinite;
+  }
+  .steam i:nth-child(2) { left: 6px; animation-delay: .5s; }
+  .steam i:nth-child(3) { left: 12px; animation-delay: 1s; }
+  @keyframes steam { from { transform: translateY(0); opacity: .7; } to { transform: translateY(-14px); opacity: 0; } }
+
+  /* 地板 */
+  .floor {
+    position: absolute; left: 0; right: 0; top: 36%; bottom: 0;
+    background:
+      repeating-linear-gradient(90deg, rgba(0, 0, 0, .18) 0 2px, transparent 2px 90px),
+      linear-gradient(#2b1d12, #1d130b);
+    border-top: 2px solid #3d2a19;
+  }
+
+  /* 餐桌与顾客 */
+  .table {
+    position: absolute; width: 17%; top: 60%; text-align: center; z-index: 2;
+    padding: 10px 6px 12px; border: 1px solid var(--line); border-radius: 14px;
+    background: linear-gradient(#201812, #181109);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .4); transition: border-color .3s, box-shadow .3s;
+  }
+  .table .customer { font-size: 30px; animation: idle 3s ease-in-out infinite; }
+  @keyframes idle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  .table .name { font: 17px var(--display); color: var(--amber); letter-spacing: 2px; margin-top: 2px; }
+  .table .dish { font-size: 22px; min-height: 28px; }
+  .table .dish.pop { animation: pop .45s cubic-bezier(.2, 1.6, .4, 1); }
+  @keyframes pop { from { transform: scale(0); } to { transform: scale(1); } }
+  .table .status { font-size: 12.5px; color: var(--dim); min-height: 20px; }
+  .table .status.ring { color: var(--green); animation: ring .7s ease-in-out infinite; display: inline-block; }
+  @keyframes ring { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+  .table.served { border-color: var(--green); box-shadow: 0 0 18px rgba(143, 209, 138, .25); }
+
+  /* 椅子 */
+  .seat {
+    position: absolute; left: 64%; top: 38%; z-index: 1;
+    font-size: 34px; filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .5));
+  }
+
+  /* 送餐员（线程） */
+  #waiter {
+    position: absolute; width: 58px; height: 58px; left: 30%; top: 45%; z-index: 5;
+    transform: translate(-50%, -50%);
+    border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ffd9a0, var(--amber) 70%);
+    display: flex; align-items: center; justify-content: center; font-size: 26px;
+    box-shadow: 0 0 20px rgba(255, 180, 84, .55), 0 8px 16px rgba(0, 0, 0, .4);
+    transition: left .38s ease, top .38s ease, filter .3s, border-radius .3s, transform .3s;
+  }
+  #waiter.walk { animation: bob .5s ease-in-out infinite; }
+  @keyframes bob { 0%, 100% { margin-top: 0; } 50% { margin-top: -5px; } }
+  #waiter.blocked { filter: grayscale(.7) brightness(.6); box-shadow: none; }
+  #waiter.blocked::after {
+    content: '💤'; position: absolute; right: -8px; top: -12px; font-size: 16px;
+    animation: zzz 1.8s ease-in-out infinite;
+  }
+  @keyframes zzz { 0% { transform: translateY(0) scale(.8); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-12px) scale(1.15); opacity: 0; } }
+  #waiter.seated { transform: translate(-50%, -50%) scaleY(.78); border-radius: 40% 40% 50% 50%; }
+
+  /* ===== 总览 2×2 ===== */
+  #quadview { position: absolute; inset: 0; display: none; padding: 4.5% 6%; }
+  .quad-grid {
+    display: grid; grid-template-columns: auto 1fr 1fr; grid-template-rows: auto 1fr 1fr;
+    gap: 12px; height: 100%;
+  }
+  .quad-axis { display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 14px; letter-spacing: 2px; text-align: center; }
+  .quad-cell {
+    border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px;
+    background: var(--panel2); opacity: .35; transform: scale(.985);
+    transition: all .35s;
+  }
+  .quad-cell.on {
+    opacity: 1; transform: none; border-color: var(--amber);
+    box-shadow: 0 0 24px rgba(255, 180, 84, .3), inset 0 0 30px rgba(255, 180, 84, .05);
+  }
+  .quad-cell h3 { margin: 0 0 8px; font: 20px var(--display); color: var(--amber); letter-spacing: 2px; }
+  .quad-cell p { margin: 0; color: var(--dim); font-size: 13.5px; }
+
+  /* ===== C 代码视图 ===== */
+  #cview { position: absolute; inset: 0; display: none; padding: 4% 5%; overflow: hidden; }
+  #cview pre { margin: 0; font: 16px/1.85 ui-monospace, "JetBrains Mono", Consolas, monospace; }
+  #cview .ln { display: block; padding: 0 12px; border-radius: 8px; color: var(--dim); transition: all .25s; }
+  #cview .ln .no { display: inline-block; width: 2em; color: #54452f; user-select: none; }
+  #cview .ln .cm { color: #7c8b62; }
+  #cview .ln.on { background: rgba(255, 180, 84, .13); color: var(--text); box-shadow: inset 3px 0 0 var(--amber); }
+
+  /* ===== 右侧栏 ===== */
+  #side { display: flex; flex-direction: column; gap: 14px; min-height: 440px; }
+  #console {
+    flex: 1; border: 1px solid var(--line); border-radius: 14px; background: var(--panel);
+    padding: 14px 16px; overflow-y: auto; max-height: 46vh; min-height: 220px; font-size: 14px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+  }
+  #console div { padding: 4px 8px; border-radius: 8px; color: var(--dim); }
+  /* 注意：日志条目只能用透明度动画——translate 会撑大滚动区域，导致滚动条闪一下又消失 */
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  #console div:last-child {
+    color: var(--text); background: rgba(255, 180, 84, .1);
+    box-shadow: inset 3px 0 0 var(--amber); animation: fadein .3s both;
+  }
+  #codebox {
+    display: none; border: 1px solid var(--line); border-radius: 14px; background: var(--panel);
+    padding: 14px 16px; overflow: auto; max-height: 40vh;
+  }
+  #codebox pre { margin: 0; font: 13px/1.7 ui-monospace, "JetBrains Mono", Consolas, monospace; color: var(--dim); white-space: pre-wrap; word-break: break-all; }
+  /* 学习模式：代码区挤占式布局，控制台让位，代码尽量展全 */
+  #side.showcode #console { flex: none; max-height: 20vh; min-height: 0; }
+  #side.showcode #codebox { flex: 1; max-height: none; min-height: 0; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 999px; padding: 8px 16px; cursor: pointer; font: 13.5px var(--body);
+    transition: all .25s;
+  }
+  button:hover { border-color: var(--amber); color: var(--amber); box-shadow: 0 0 12px rgba(255, 180, 84, .25); }
+  button:active { transform: scale(.96); }
+  #freeze { display: none; border-color: rgba(255, 95, 86, .5); color: var(--red); }
+  #freeze:hover { box-shadow: 0 0 12px rgba(255, 95, 86, .3); border-color: var(--red); }
+</style>
+</head>
+<body>
+
+<header class="reveal">
+  <span class="logo">深夜食堂<small>同步/异步 × 阻塞/非阻塞</small></span>
+  <nav id="nav">
+    <a href="?scene=overview" data-scene="overview">总览</a>
+    <a href="?scene=sync-blocking" data-scene="sync-blocking">同步阻塞</a>
+    <a href="?scene=sync-nonblocking" data-scene="sync-nonblocking">同步非阻塞</a>
+    <a href="?scene=async-blocking" data-scene="async-blocking">异步阻塞</a>
+    <a href="?scene=async-nonblocking" data-scene="async-nonblocking">异步非阻塞</a>
+    <a href="?scene=c-epoll" data-scene="c-epoll">C · epoll</a>
+  </nav>
+  <span class="hint"><kbd>空格</kbd> 下一步 · <kbd>R</kbd> 重置 · <kbd>C</kbd> 显示/隐藏代码</span>
+</header>
+
+<main>
+  <section id="stage" class="reveal d1">
+    <!-- 餐厅视图 -->
+    <div id="restaurant">
+      <div class="lanterns"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div id="kitchen">
+        <span class="zone-label">厨房 = 操作系统/硬件</span>
+        <div id="orders"></div>
+        <div class="window"></div>
+      </div>
+      <div class="seat">🪑</div>
+      <div class="table" data-t="A" style="left:8%">
+        <div class="customer">🧑‍💼</div><div class="name">A 桌</div>
+        <div class="dish"></div><div class="status">—</div>
+      </div>
+      <div class="table" data-t="B" style="left:41.5%">
+        <div class="customer">🧑‍🎓</div><div class="name">B 桌</div>
+        <div class="dish"></div><div class="status">—</div>
+      </div>
+      <div class="table" data-t="C" style="left:75%">
+        <div class="customer">🧑‍🎨</div><div class="name">C 桌</div>
+        <div class="dish"></div><div class="status">—</div>
+      </div>
+      <div class="floor"></div>
+      <div id="waiter"><span id="waiterFace">🧍</span></div>
+    </div>
+
+    <!-- 总览 2×2 视图 -->
+    <div id="quadview">
+      <div class="quad-grid">
+        <div class="quad-axis"></div>
+        <div class="quad-axis">阻塞（线程睡了）</div>
+        <div class="quad-axis">非阻塞（线程没睡）</div>
+        <div class="quad-axis">同步<br>（按序执行）</div>
+        <div class="quad-cell" data-quad="sb"><h3>同步阻塞</h3><p>杵在窗口死等，严格 A→B→C 上菜</p></div>
+        <div class="quad-cell" data-quad="snb"><h3>同步非阻塞</h3><p>反复跑窗口问（轮询），仍死守顺序，人没闲着</p></div>
+        <div class="quad-axis">异步<br>（顺序不定）</div>
+        <div class="quad-cell" data-quad="ab"><h3>异步阻塞</h3><p>坐下等铃响（epoll_wait），没铃不动</p></div>
+        <div class="quad-cell" data-quad="anb"><h3>异步非阻塞</h3><p>边干活边等铃，铃响放下活去取餐</p></div>
+      </div>
+    </div>
+
+    <!-- C 代码视图 -->
+    <div id="cview"><pre id="cpre"></pre></div>
+  </section>
+
+  <section id="side" class="reveal d2">
+    <div id="console"></div>
+    <div id="codebox"><pre id="code"></pre></div>
+    <div id="controls">
+      <button id="next">下一步 ⏵（空格）</button>
+      <button id="reset">重置 R</button>
+      <button id="togglecode">显示代码 C</button>
+      <button id="freeze">🥶 真·阻塞 2 秒（页面会冻住，故意的）</button>
+    </div>
+  </section>
+</main>
+
+<script>
+// ==== LOGIC START ====
+// 公共设定（四场景共用，厨房 = 操作系统，完全一致）
+const TABLES = ['A', 'B', 'C'];
+const COOK_TICKS = { A: 7, B: 2, C: 4 }; // 耗时不同 → 出锅顺序 B→C→A ≠ 下单顺序
+                                         // 下单各占一拍，A 先下单先开工，必须足够慢 C 才会先出锅
+
+function createKitchen() {
+  return {
+    orders: [],            // { table, left }
+    submit(t) { this.orders.push({ table: t, left: COOK_TICKS[t] }); },
+    tick()    { this.orders.forEach(o => o.left--); },
+    ready()   { return this.orders.filter(o => o.left <= 0); },
+    take(t)   { this.orders = this.orders.filter(o => o.table !== t); },
+  };
+}
+
+// 场景一 · 同步阻塞：死等当前这单，送完才接下一单
+// mood: work=跑动 / blocked=站着睡(阻塞) / sit=坐椅子(阻塞) / carry=上菜 / idle=收工
+function* syncBlocking(kitchen, state) {
+  for (const t of TABLES) {
+    kitchen.submit(t);
+    yield { text: `${t} 桌下单，送餐员把单子递进厨房，然后杵在窗口等`, at: 'window', mood: 'work' };
+    while (!kitchen.ready().some(o => o.table === t)) {
+      yield { text: `（死等 ${t} 的菜……线程阻塞中，哪也不去）`, at: 'window', mood: 'blocked' };
+    }
+    kitchen.take(t); state.served.push(t);
+    yield { text: `取餐，送到 ${t} 桌 ✅（严格 A→B→C = 同步；死等 = 阻塞）`, at: t, mood: 'carry' };
+  }
+  yield { text: `🏁 全部送完：送餐员大部分时间都在等，B/C 桌全程干等`, at: 'hall1', mood: 'idle' };
+}
+
+// 场景二 · 同步非阻塞（轮询：不死等，但顺序仍死守 A→B→C）
+function* syncNonBlocking(kitchen, state) {
+  let chores = 0, spot = 0;
+  for (const t of TABLES) {
+    kitchen.submit(t);
+    yield { text: `${t} 桌下单（心里只装着这一单）`, at: t, mood: 'work' };
+    while (!kitchen.ready().some(o => o.table === t)) {
+      chores++; spot = 1 - spot;
+      yield { text: `跑窗口问「${t} 好了没」→ 没好，回去干杂活 #${chores}（线程没睡 = 非阻塞；死守 A→B→C = 同步）`, at: spot ? 'window' : 'hall1', mood: 'work' };
+    }
+    kitchen.take(t); state.served.push(t);
+    yield { text: `取餐送到 ${t} 桌 ✅（顺序仍 A→B→C）`, at: t, mood: 'carry' };
+  }
+  yield { text: `🏁 全部送完：顺序保住了，但大量跑腿是空转（CPU 空转）`, at: 'hall2', mood: 'idle' };
+}
+
+// 场景三 · 异步阻塞（全部下单后坐下等铃 = epoll_wait(-1)）
+function* asyncBlocking(kitchen, state) {
+  for (const t of TABLES) {
+    kitchen.submit(t);
+    yield { text: `${t} 桌下单，领一个餐铃 🛎️（= epoll_ctl 注册）`, at: t, mood: 'work' };
+  }
+  yield { text: `三单都下完了，送餐员坐下 —— epoll_wait(-1)，线程睡死`, at: 'seat', mood: 'sit' };
+  while (state.served.length < TABLES.length) {
+    const served = kitchen.ready();
+    if (!served.length) {
+      yield { text: `（坐着等铃响……线程阻塞中。页面没卡死吧？线程睡着 ≠ 死了）`, at: 'seat', mood: 'sit' };
+      continue;
+    }
+    for (const o of served) {
+      kitchen.take(o.table); state.served.push(o.table);
+      yield { text: `🔔 ${o.table} 的铃响了！取餐送到 ${o.table} 桌 ✅（出锅顺序 ≠ 下单顺序 = 异步）`, at: o.table, mood: 'carry' };
+    }
+  }
+  yield { text: `🏁 全部送完：等待时线程在睡（阻塞），上菜顺序看铃（异步）`, at: 'seat', mood: 'sit' };
+}
+
+// 场景四 · 异步非阻塞（不等铃先干活，铃响再回来取餐）
+function* asyncNonBlocking(kitchen, state) {
+  for (const t of TABLES) {
+    kitchen.submit(t);
+    yield { text: `${t} 桌下单，领餐铃 🛎️`, at: t, mood: 'work' };
+  }
+  // 与场景三的「坐下」叙事拍对齐：保证两个场景厨房时间轴一致，差别只在送餐员干什么
+  yield { text: `三单都下完了，不等铃 —— 直接去大堂干活（事件循环继续转）`, at: 'hall1', mood: 'work' };
+  let chores = 0, spot = 0;
+  while (state.served.length < TABLES.length) {
+    const served = kitchen.ready();
+    if (served.length) {
+      for (const o of served) {
+        kitchen.take(o.table); state.served.push(o.table);
+        yield { text: `🔔 ${o.table} 铃响 → 放下手头活，取餐送到 ${o.table} 桌 ✅（异步）`, at: o.table, mood: 'carry' };
+      }
+    } else {
+      chores++; spot = 1 - spot;
+      yield { text: `没铃响 → 继续干杂活 #${chores}（倒水/招呼客人，线程不睡 = 非阻塞）`, at: spot ? 'hall1' : 'hall2', mood: 'work' };
+    }
+  }
+  yield { text: `🏁 全部送完：等待的时间全变成了有用功`, at: 'hall1', mood: 'idle' };
+}
+
+// 总览 · 2×2 坐标系
+function* overviewSteps() {
+  yield { quad: null,  text: '两个维度：横轴 = 线程状态（阻塞/非阻塞），纵轴 = 代码段顺序（同步/异步）' };
+  yield { quad: 'sb',  text: '同步阻塞：杵在窗口死等，严格 A→B→C' };
+  yield { quad: 'snb', text: '同步非阻塞：反复跑窗口问（轮询），顺序死守，人没闲着' };
+  yield { quad: 'ab',  text: '异步阻塞：坐下等铃响（epoll_wait），没铃不动' };
+  yield { quad: 'anb', text: '异步非阻塞：边干活边等铃，铃响再来取餐' };
+  yield { quad: null,  text: '关键：先钉死主语（线程）和范围（代码段），否则谈组合没有意义' };
+}
+
+// C 代码 · 逐行讲解节拍
+const C_LINES = [
+  '// 异步阻塞（epoll）：socket 全部设为非阻塞，线程睡在 epoll_wait',
+  'int epfd = epoll_create1(0);',
+  'for (int i = 0; i < nfds; i++) {',
+  '    fcntl(fds[i], F_SETFL, O_NONBLOCK);           // read/write 本身永不阻塞',
+  '    struct epoll_event ev = { .events = EPOLLIN, .data.fd = fds[i] };',
+  '    epoll_ctl(epfd, EPOLL_CTL_ADD, fds[i], &ev);  // 下单 + 领餐铃',
+  '}',
+  'while (1) {',
+  '    // 没活干，线程睡死在这里 ← 阻塞（= 送餐员坐下等铃响）',
+  '    int n = epoll_wait(epfd, events, MAX_EVENTS, -1);',
+  '    for (int i = 0; i < n; i++)',
+  '        handle(events[i].data.fd);   // 哪个先来处理哪个 ← 异步（顺序不定）',
+  '}',
+];
+
+function* cSteps() {
+  yield { lines: [2],            text: '创建 epoll 实例（= 餐厅的叫号系统）' };
+  yield { lines: [3,4,5,6,7],    text: '所有 socket 设 O_NONBLOCK 并注册：read/write 永不阻塞（下单 + 领餐铃）' };
+  yield { lines: [10],           text: 'epoll_wait(-1)：没活干，线程睡死在这 ← 阻塞（送餐员坐下等铃）' };
+  yield { lines: [11, 12],       text: '就绪几单处理几单，哪个先来处理哪个 ← 异步（顺序不定）' };
+  yield { lines: [],             text: '一句话：等一个还没来的事件不可能零成本——要么自己睡，要么外包给别的线程/内核' };
+}
+// ==== LOGIC END ====
+</script>
+
+<script>
+// ===== 场景注册 =====
+const SCENES = {
+  'overview':         { title: '总览：一张图讲清', view: 'quad',       make: overviewSteps },
+  'sync-blocking':    { title: '同步阻塞',        view: 'restaurant', make: syncBlocking,    freeze: true },
+  'sync-nonblocking': { title: '同步非阻塞（轮询）', view: 'restaurant', make: syncNonBlocking },
+  'async-blocking':   { title: '异步阻塞',        view: 'restaurant', make: asyncBlocking },
+  'async-nonblocking':{ title: '异步非阻塞',      view: 'restaurant', make: asyncNonBlocking },
+  'c-epoll':          { title: 'C · epoll 异步阻塞', view: 'c',        make: cSteps },
+};
+
+const COMMON_SRC = `const TABLES = ['A', 'B', 'C'];\nconst COOK_TICKS = { A: 7, B: 2, C: 4 };\n\n` + createKitchen.toString().replace('function createKitchen', '// 厨房 = 操作系统/硬件\nfunction createKitchen');
+
+// ===== DOM =====
+const $ = s => document.querySelector(s);
+const waiterEl = $('#waiter'), waiterFace = $('#waiterFace'), ordersEl = $('#orders'), consoleEl = $('#console');
+const POS = { // 送餐员位置（舞台百分比）
+  window: { left: '50%', top: '40%' }, seat: { left: '65.5%', top: '40%' },
+  A: { left: '16.5%', top: '54%' }, B: { left: '50%', top: '54%' }, C: { left: '83.5%', top: '54%' },
+  hall1: { left: '30%', top: '47%' }, hall2: { left: '70%', top: '47%' },
+};
+const MOOD_FACE = { work: '🏃', blocked: '😴', sit: '😴', carry: '🍜', idle: '🧍' };
+
+const params = new URLSearchParams(location.search);
+const sceneName = SCENES[params.get('scene')] ? params.get('scene') : 'overview';
+const scene = SCENES[sceneName];
+
+let kitchen, state, gen;
+
+function start() {
+  kitchen = createKitchen();
+  state = { served: [] };
+  gen = scene.make(kitchen, state);
+  consoleEl.innerHTML = '';
+  log(`【${scene.title}】按空格开始 ▶`);
+  moveWaiter('hall1');
+  setMood('idle');
+  render();
+}
+
+function log(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  consoleEl.appendChild(div);
+  requestAnimationFrame(() => { consoleEl.scrollTop = consoleEl.scrollHeight; });
+}
+
+function moveWaiter(at) {
+  const p = POS[at] || POS.hall1;
+  waiterEl.style.left = p.left;
+  waiterEl.style.top = p.top;
+}
+
+function setMood(m) {
+  waiterFace.textContent = MOOD_FACE[m] || '🧍';
+  waiterEl.classList.toggle('walk', m === 'work' || m === 'carry');
+  waiterEl.classList.toggle('blocked', m === 'blocked' || m === 'sit');
+  waiterEl.classList.toggle('seated', m === 'sit');
+}
+
+function render() {
+  // 厨房订单（带蒸汽/出锅动画）
+  ordersEl.innerHTML = '';
+  for (const o of kitchen.orders) {
+    const total = COOK_TICKS[o.table], pct = Math.max(0, Math.min(100, (total - o.left) / total * 100));
+    const div = document.createElement('div');
+    div.className = 'order' + (o.left <= 0 ? ' ready' : '');
+    div.innerHTML = o.left <= 0
+      ? `🛎️ ${o.table} 出锅！<div class="bar"><i style="width:100%"></i></div>`
+      : `<div class="steam"><i></i><i></i><i></i></div>🍳 ${o.table} 制作中 剩 ${o.left} 拍<div class="bar"><i style="width:${pct}%"></i></div>`;
+    ordersEl.appendChild(div);
+  }
+  // 桌台状态（顾客表情 / 上菜 / 铃响）
+  document.querySelectorAll('.table').forEach(el => {
+    const t = el.dataset.t;
+    const st = el.querySelector('.status'), cu = el.querySelector('.customer'), di = el.querySelector('.dish');
+    const o = kitchen.orders.find(o => o.table === t);
+    const served = state.served.includes(t);
+    el.classList.toggle('served', served);
+    st.classList.remove('ring');
+    if (served) {
+      st.textContent = '✅ 上菜了'; cu.textContent = '😋';
+      if (di.textContent !== '🍜') { di.textContent = '🍜'; di.classList.remove('pop'); void di.offsetWidth; di.classList.add('pop'); }
+    } else if (o && o.left <= 0) {
+      st.textContent = '🛎️ 菜好了，铃在响！'; st.classList.add('ring');
+    } else if (o) {
+      st.textContent = '已下单，等菜中'; cu.textContent = '😫';
+    } else {
+      st.textContent = '—';
+      cu.textContent = { A: '🧑‍💼', B: '🧑‍🎓', C: '🧑‍🎨' }[t];   // 重置时恢复顾客初始表情
+      di.textContent = '';                                    // 并清掉上一轮的面碗
+    }
+  });
+}
+
+function step() {
+  kitchen.tick();                       // 每按一次，厨房推进一个节拍
+  const r = gen.next();
+  if (r.done) {
+    if (!state.ended) { state.ended = true; log('—— 本场景结束，按 R 重来 ——'); }
+    return;
+  }
+  const v = r.value;
+  if (v.text) log(v.text);
+  if (v.at) moveWaiter(v.at);
+  if (v.mood) setMood(v.mood);
+  if (scene.view === 'quad' && 'quad' in v) {
+    document.querySelectorAll('.quad-cell').forEach(c => c.classList.toggle('on', c.dataset.quad === v.quad));
+  }
+  if (scene.view === 'c' && v.lines) {
+    document.querySelectorAll('#cview .ln').forEach(el => {
+      el.classList.toggle('on', v.lines.includes(+el.dataset.no));
+    });
+  }
+  render();
+}
+
+// ===== 视图初始化 =====
+document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.scene === sceneName));
+$('#restaurant').style.display = scene.view === 'restaurant' ? '' : 'none';
+$('#quadview').style.display  = scene.view === 'quad' ? 'block' : 'none';
+$('#cview').style.display     = scene.view === 'c' ? 'block' : 'none';
+$('#freeze').style.display    = scene.freeze ? 'inline-block' : 'none';
+
+if (scene.view === 'c') {
+  const esc = s => s.replace(/</g, '&lt;');
+  const colorize = s => s.replace(/(\/\/.*)$/, '<span class="cm">$1</span>');
+  $('#cpre').innerHTML = C_LINES.map((ln, i) =>
+    `<span class="ln" data-no="${i + 1}"><span class="no">${i + 1}</span>${colorize(esc(ln))}</span>`).join('');
+}
+
+// 学习模式：显示代码（演示模式默认隐藏，录屏用演示模式）
+let codeOn = false;
+function toggleCode() {
+  codeOn = !codeOn;
+  $('#side').classList.toggle('showcode', codeOn);
+  $('#codebox').style.display = codeOn ? 'block' : 'none';
+  $('#togglecode').textContent = codeOn ? '隐藏代码 C' : '显示代码 C';
+  if (codeOn) {
+    const src = scene.make === overviewSteps ? '// 总览场景：无代码，只有坐标系'
+      : scene.make === cSteps ? C_LINES.join('\n')
+      : COMMON_SRC + '\n\n' + scene.make.toString();
+    $('#code').textContent = src;
+  }
+}
+
+$('#next').onclick = step;
+$('#reset').onclick = start;
+$('#togglecode').onclick = toggleCode;
+$('#freeze').onclick = () => {
+  log('主线程忙等 2 秒——注意：整个页面（灯笼、蒸汽、按钮）全部冻住，这就是阻塞');
+  const end = Date.now() + 2000;
+  while (Date.now() < end) {}           // 故意的忙等：冻结本身就是证据
+  log('← 解冻了。刚才那 2 秒里送餐员（线程）就是这种状态');
+};
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'ArrowRight') { e.preventDefault(); step(); }
+  else if (e.key === 'r' || e.key === 'R') start();
+  else if (e.key === 'c' || e.key === 'C') toggleCode();
+});
+
+start();
+
+// 调试用：?steps=N 加载后自动推进 N 拍；?code=1 直接开启学习模式（用于无头截图/自检）
+const autoSteps = parseInt(params.get('steps') || '0', 10);
+for (let i = 0; i < autoSteps; i++) step();
+if (params.get('code') === '1') toggleCode();
+</script>
+</body>
+</html>
