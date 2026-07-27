@@ -200,6 +200,24 @@
   .quad-cell h3 { margin: 0 0 8px; font: 20px var(--display); color: var(--amber); letter-spacing: 2px; }
   .quad-cell p { margin: 0; color: var(--dim); font-size: 13.5px; }
 
+  /* 总览双栏：左边坐标系 + 右边餐厅演示（讲总览时同步讲解演示） */
+  #stage.ov #quadview { right: auto; width: 44%; padding: 4.5% 3%; }
+  #stage.ov .quad-cell h3 { font-size: 17px; }
+  #stage.ov .quad-cell p { font-size: 12.5px; }
+  #stage.ov .quad-axis { font-size: 12px; }
+  #stage.ov #restaurant {
+    position: absolute; left: 44%; right: 0; top: 0; bottom: 0;
+    border-left: 1px dashed var(--line);
+  }
+  /* 演示区缩进半栏，等比缩小固定像素元素 */
+  #stage.ov .order { min-width: 92px; padding: 6px 9px; font-size: 11.5px; }
+  #stage.ov .table .customer { font-size: 24px; }
+  #stage.ov .table .name { font-size: 14px; }
+  #stage.ov .table .dish { font-size: 18px; min-height: 23px; }
+  #stage.ov .table .status { font-size: 11px; min-height: 17px; }
+  #stage.ov .seat { font-size: 27px; }
+  #stage.ov #waiter { width: 46px; height: 46px; font-size: 21px; }
+
   /* ===== C 代码视图 ===== */
   #cview { position: absolute; inset: 0; display: none; padding: 4% 5%; overflow: hidden; }
   #cview pre { margin: 0; font: 16px/1.85 ui-monospace, "JetBrains Mono", Consolas, monospace; }
@@ -430,14 +448,22 @@ function* asyncNonBlocking(kitchen, state) {
   yield { text: `🏁 全部送完：等待的时间全变成了有用功`, at: 'hall1', mood: 'idle', cost: 'free' };
 }
 
-// 总览 · 2×2 坐标系
-function* overviewSteps() {
-  yield { quad: null,  text: '两个维度：横轴 = 线程状态（阻塞/非阻塞），纵轴 = 代码段顺序（同步/异步）' };
-  yield { quad: 'sb',  text: '同步阻塞：杵在窗口死等，严格 A→B→C' };
-  yield { quad: 'snb', text: '同步非阻塞：反复跑窗口问（轮询），顺序死守，人没闲着' };
-  yield { quad: 'ab',  text: '异步阻塞：坐下等铃响（epoll_wait），没铃不动' };
-  yield { quad: 'anb', text: '异步非阻塞：边干活边等铃，铃响再来取餐' };
-  yield { quad: null,  text: '关键：先钉死主语（线程）和范围（代码段），否则谈组合没有意义' };
+// 总览 · 2×2 坐标系 + 餐厅演示（左图右演，讲到哪格送餐员就演哪格）
+function* overviewSteps(kitchen, state) {
+  yield { quad: null, at: 'hall1', mood: 'idle', text: '先看右边餐厅：送餐员 = 线程（全店只有 1 个），厨房 = 操作系统，三桌订单 = 代码段' };
+  kitchen.submit('A');
+  yield { quad: null, at: 'A', mood: 'work', text: 'A 桌下单 —— 订单就是一段要执行的代码' };
+  kitchen.submit('B');
+  yield { quad: null, at: 'B', mood: 'work', text: 'B 桌下单' };
+  kitchen.submit('C');
+  yield { quad: null, at: 'C', mood: 'work', text: 'C 桌下单：下单顺序 A→B→C' };
+  yield { quad: null, at: 'hall1', mood: 'idle', text: '厨房按自己节奏做菜：B 先出锅 🛎️（出锅顺序由菜品决定，≠ 下单顺序）' };
+  yield { quad: null, at: 'hall1', mood: 'idle', text: '左边坐标系：横轴 = 线程状态（阻塞/非阻塞），纵轴 = 代码段顺序（同步/异步）——两个维度都长在送餐员身上' };
+  yield { quad: 'sb',  at: 'window', mood: 'blocked', text: '同步阻塞：杵在窗口死等，严格 A→B→C' };
+  yield { quad: 'snb', at: 'window', mood: 'work',    text: '同步非阻塞：反复跑窗口问（轮询），顺序死守，人没闲着' };
+  yield { quad: 'ab',  at: 'seat',   mood: 'sit',     text: '异步阻塞：坐下等铃响（epoll_wait），没铃不动' };
+  yield { quad: 'anb', at: 'hall2',  mood: 'work',    text: '异步非阻塞：边干活边等铃，铃响再来取餐' };
+  yield { quad: null,  at: 'hall1',  mood: 'idle',    text: '关键：先钉死主语（线程）和范围（代码段）。接下来逐个场景看完整演示 →' };
 }
 
 // C 代码 · 逐行讲解节拍
@@ -606,7 +632,9 @@ function renderStats() {
 
 // ===== 视图初始化 =====
 document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.scene === sceneName));
-$('#restaurant').style.display = scene.view === 'restaurant' ? '' : 'none';
+const showRest = scene.view === 'restaurant' || scene.view === 'quad';  // 总览页也要餐厅（右半栏演示）
+$('#stage').classList.toggle('ov', scene.view === 'quad');
+$('#restaurant').style.display = showRest ? '' : 'none';
 $('#stats').style.display     = scene.view === 'restaurant' ? 'flex' : 'none';
 $('#quadview').style.display  = scene.view === 'quad' ? 'block' : 'none';
 $('#cview').style.display     = scene.view === 'c' ? 'block' : 'none';
@@ -627,8 +655,7 @@ function toggleCode() {
   $('#codebox').style.display = codeOn ? 'block' : 'none';
   $('#togglecode').textContent = codeOn ? '隐藏代码 C' : '显示代码 C';
   if (codeOn) {
-    const src = scene.make === overviewSteps ? '// 总览场景：无代码，只有坐标系'
-      : scene.make === cSteps ? C_LINES.join('\n')
+    const src = scene.make === cSteps ? C_LINES.join('\n')
       : COMMON_SRC + '\n\n' + scene.make.toString();
     $('#code').textContent = src;
   }
