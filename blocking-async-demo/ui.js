@@ -199,12 +199,33 @@ function toggleCode() {
 $('#next').onclick = step;
 $('#reset').onclick = start;
 $('#togglecode').onclick = toggleCode;
-$('#freeze').onclick = () => {
-  log('主线程忙等 2 秒——注意：整个页面（灯笼、蒸汽、按钮）全部冻住，这就是阻塞');
-  const end = Date.now() + 2000;
-  while (Date.now() < end) {}           // 故意的忙等：冻结本身就是证据
-  log('← 解冻了。刚才那 2 秒里送餐员（线程）就是这种状态');
-};
+
+// 页面心跳：setInterval 每 0.1s 跳一下，主线程一阻塞立刻停跳——比 CSS 动画诚实
+// （transform/opacity 动画走合成线程，阻塞时可能照动，不能拿来作证）
+const hbT0 = performance.now();
+let hbFlip = false;
+setInterval(() => {
+  $('#hbTime').textContent = ((performance.now() - hbT0) / 1000).toFixed(1);
+  $('#hbDot').classList.toggle('on', hbFlip = !hbFlip);
+}, 100);
+
+// 真·阻塞：忙等 2 秒，冻结本身就是证据。
+// 冻结期间的点击不会丢：浏览器把它们排队，解冻后一次性派发——timeStamp 早于解冻时刻的就是排队点击
+let thawAt = 0, queuedClicks = 0;
+$('#freeze').addEventListener('click', e => {
+  if (thawAt && (e.timeStamp < thawAt || performance.now() - thawAt < 250)) {
+    queuedClicks++;
+    $('#queueReport').textContent = `❄️ 冻结期间你又点了 ${queuedClicks} 下——现在才被一起处理（事件没丢，只是排队没人理）`;
+    return;
+  }
+  queuedClicks = 0;
+  $('#queueReport').textContent = '';
+  log('主线程忙等 2 秒——盯紧下方「页面心跳」：它会当场停跳，按钮也点不动');
+  const end = performance.now() + 2000;
+  while (performance.now() < end) {}        // 故意的忙等：冻结本身就是证据
+  thawAt = performance.now();
+  log('← 解冻了。心跳停跳的那 2 秒，就是同步阻塞里送餐员（线程）的状态');
+});
 
 document.addEventListener('keydown', e => {
   if (e.code === 'Space' || e.code === 'ArrowRight') { e.preventDefault(); step(); }
