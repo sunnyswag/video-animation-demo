@@ -78,14 +78,6 @@
     <!-- 数据总结视图（卡片由 JS 根据真实运行结果生成） -->
     <div id="sumview">
       <div class="sum-grid" id="sumGrid"></div>
-      <div class="sum-foot">
-        <div class="row1">
-          <button id="freeze">🥶 真·阻塞 2 秒</button>
-          <span id="heartbeat"><i id="hbDot"></i>页面心跳 <b id="hbTime">0.0</b> s<small>（JS 每 0.1s 跳一下）</small></span>
-          <span class="sum-hint">点按钮 → 主线程死循环 2 秒：心跳当场停跳、按钮点不动。冻结期间再点几下试试——点击不会丢，会排队到解冻瞬间一次性涌出</span>
-        </div>
-        <span id="queueReport"></span>
-      </div>
     </div>
 
     <!-- C 代码视图 -->
